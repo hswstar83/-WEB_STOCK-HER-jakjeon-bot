@@ -20,22 +20,30 @@ st.markdown("""
     <style>
     .main-title { font-size: 1.8rem !important; color: #1E1E1E; text-align: center; font-weight: 800; margin-bottom: 5px; }
     .sub-text { font-size: 0.9rem; color: #555; text-align: center; margin-bottom: 20px; }
-    .profit-badge-plus { background-color: #ffebee; color: #d32f2f; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.8rem; }
-    .profit-badge-minus { background-color: #e3f2fd; color: #1976d2; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.8rem; }
     
-    /* 상세 정보 텍스트 스타일 (카드 안에 쏙 들어오게 수정) */
+    /* 배지 스타일 (공통) */
+    .badge {
+        padding: 3px 8px;
+        border-radius: 4px;
+        font-weight: 700;
+        font-size: 0.85rem;
+        margin-right: 6px;
+    }
+    .badge-red { background-color: #ffebee; color: #d32f2f; }
+    .badge-blue { background-color: #e3f2fd; color: #1976d2; }
+    .badge-gray { background-color: #f5f5f5; color: #616161; }
+
     .detail-info {
         font-size: 0.85rem;
         color: #444;
         background-color: #f8f9fa;
         padding: 12px;
         border-radius: 8px;
-        margin-top: 12px; /* 위쪽 요소와 간격 */
+        margin-top: 12px;
         line-height: 1.6;
         border: 1px solid #eee;
     }
     
-    /* 요약 지표 가로 정렬 */
     .metric-container {
         display: flex;
         justify-content: space-around;
@@ -81,12 +89,12 @@ def get_market_cap_data():
     except:
         return {}
 
-# 4. 상세 분석 및 차트 데이터
+# 4. 상세 분석 데이터 (오늘 등락률 추가!)
 @st.cache_data(ttl=3600)
 def get_stock_analysis(code):
     try:
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=100)
+        start_date = end_date - timedelta(days=120)
         df = fdr.DataReader(code, start=start_date)
         
         if len(df) < 60: return None, None
@@ -94,6 +102,10 @@ def get_stock_analysis(code):
         last_row = df.iloc[-1]
         close = last_row['Close']
         volume = last_row['Volume']
+        
+        # 🌟 [NEW] 오늘 하루 변동폭 (Change 컬럼 활용)
+        # fdr의 Change는 0.03 (3%) 형태로 나옴
+        daily_change = last_row['Change'] * 100 
         
         amount = int((close * volume) / 100000000)
         ma60 = df['Close'].rolling(60).mean().iloc[-1]
@@ -104,17 +116,18 @@ def get_stock_analysis(code):
         min_p = df_recent['Close'].min()
         box_range = ((max_p - min_p) / min_p) * 100
         
-        chart_data = df['Close'].tail(30)
+        chart_data = df['Close'].tail(60)
         
         return chart_data, {
             'amount': amount,
             'trend': trend,
-            'box_range': box_range
+            'box_range': box_range,
+            'daily_change': daily_change # 추가됨
         }
     except:
         return None, None
 
-# 5. [수정됨] 차트 그리기 (고정 기능 추가)
+# 5. 차트 그리기
 def plot_sparkline(data, color_hex):
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -128,11 +141,9 @@ def plot_sparkline(data, color_hex):
     fig.update_layout(
         showlegend=False, margin=dict(l=0, r=0, t=0, b=0),
         height=80, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        
-        # 🌟 [핵심] 차트 고정 (줌, 드래그 방지)
         dragmode=False, 
-        xaxis=dict(visible=False, fixedrange=True), # X축 고정
-        yaxis=dict(visible=False, range=[min_val - padding, max_val + padding], fixedrange=True) # Y축 고정
+        xaxis=dict(visible=False, fixedrange=True),
+        yaxis=dict(visible=False, range=[min_val - padding, max_val + padding], fixedrange=True)
     )
     return fig
 
@@ -187,8 +198,9 @@ if raw_df is not None and not raw_df.empty:
     st.subheader("📋 포착 종목 리스트")
     
     for index, row in df.iterrows():
-        profit = row['수익률_숫자']
-        profit_str = row['수익률(%)']
+        # 총 수익률 (포착가 대비)
+        total_profit = row['수익률_숫자']
+        total_profit_str = row['수익률(%)']
         price = row['현재가_표시']
         code = row['코드'].replace("'", "")
         
@@ -196,39 +208,56 @@ if raw_df is not None and not raw_df.empty:
             price_fmt = f"{int(str(price).replace(',','')): ,}원"
         except:
             price_fmt = price
-
-        badge_class = "profit-badge-plus" if profit >= 0 else "profit-badge-minus"
         
+        # 상세 데이터 계산
         chart_data, analysis = get_stock_analysis(code)
         
+        # 시가총액
         marcap_val = marcap_dict.get(code, 0)
         marcap_str = f"{int(marcap_val / 100000000):,}억원" if marcap_val > 0 else "정보없음"
 
         with st.container(border=True):
-            # 1단: 기본 정보와 차트
             col_info, col_chart = st.columns([1.8, 1.2])
             
             with col_info:
-                st.markdown(f"**{row['종목명']}** <span style='color:#888; font-size:0.8em;'>({code})</span> <span class='{badge_class}'>{profit_str}</span>", unsafe_allow_html=True)
-                st.markdown(f"<div style='margin-top:5px; font-size:0.95em; font-weight:bold;'>{price_fmt}</div>", unsafe_allow_html=True)
+                # 1. 종목명
+                st.markdown(f"**{row['종목명']}** <span style='color:#888; font-size:0.8em;'>({code})</span>", unsafe_allow_html=True)
+                
+                # 2. 수익률 배지 2개 (누적 / 오늘)
+                # 배지 색상 결정
+                total_color = "badge-red" if total_profit >= 0 else "badge-blue"
+                
+                daily_badge_html = ""
+                if analysis:
+                    daily_change = analysis['daily_change']
+                    daily_color = "badge-red" if daily_change >= 0 else "badge-blue"
+                    daily_badge_html = f"<span class='badge {daily_color}'>오늘 {daily_change:+.2f}%</span>"
+                
+                st.markdown(f"""
+                <div style="margin-top:4px; margin-bottom:4px;">
+                    <span class='badge {total_color}'>누적 {total_profit_str}</span>
+                    {daily_badge_html}
+                </div>
+                """, unsafe_allow_html=True)
+
+                # 3. 현재가
+                st.markdown(f"<div style='font-size:0.95em; font-weight:bold;'>{price_fmt}</div>", unsafe_allow_html=True)
+                
                 st.caption(f"{row['탐색일']} 포착")
-                # (여기 있던 18배 표시는 아래 박스로 이동했습니다)
             
             with col_chart:
                 if chart_data is not None and not chart_data.empty:
-                    color_hex = '#d32f2f' if profit >= 0 else '#1976d2'
-                    # config={'staticPlot': True} 추가하여 완전 고정 (터치 안됨)
+                    color_hex = '#d32f2f' if total_profit >= 0 else '#1976d2'
                     fig = plot_sparkline(chart_data, color_hex)
                     st.plotly_chart(fig, use_container_width=True, config={'staticPlot': True}) 
                 else:
                     st.caption("차트 로딩 실패")
             
-            # 2단: 상세 정보 박스 (레이아웃 분리)
-            # 여기로 '거래량급증' 정보를 옮겼습니다.
+            # 상세 정보 박스
             if analysis:
                 st.markdown(f"""
                 <div class="detail-info">
-                • <b>거래량급증:</b> {row['거래량급증']}<br>
+                • <b>거래량급증:</b> {row['거래량급증']} (포착당일 기준)<br>
                 • <b>시가총액:</b> {marcap_str}<br>
                 • <b>오늘대금:</b> {analysis['amount']:,}억원<br>
                 • <b>추세확인:</b> {analysis['trend']}<br>
