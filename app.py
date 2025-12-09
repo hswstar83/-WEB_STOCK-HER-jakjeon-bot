@@ -6,6 +6,7 @@ import json
 import os
 import FinanceDataReader as fdr
 from datetime import datetime, timedelta
+import plotly.graph_objects as go # 👈 강력한 차트 도구 추가
 
 # 1. 페이지 설정
 st.set_page_config(
@@ -21,12 +22,10 @@ st.markdown("""
     .sub-text { font-size: 0.9rem; color: #555; text-align: center; margin-bottom: 20px; }
     .profit-badge-plus { background-color: #ffebee; color: #d32f2f; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.8rem; }
     .profit-badge-minus { background-color: #e3f2fd; color: #1976d2; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.8rem; }
-    /* 차트 여백 최소화 */
-    .stChart { margin-top: -20px; }
     </style>
 """, unsafe_allow_html=True)
 
-# 2. 데이터 로드 함수 (구글 시트)
+# 2. 데이터 로드 함수
 @st.cache_data(ttl=60)
 def load_data():
     try:
@@ -47,17 +46,47 @@ def load_data():
     except:
         return pd.DataFrame()
 
-# 3. 미니 차트용 데이터 가져오기 (30일치)
-@st.cache_data(ttl=3600) # 1시간마다 캐싱 (너무 자주 부르면 느려짐)
+# 3. 미니 차트 데이터 가져오기 (30일치)
+@st.cache_data(ttl=3600)
 def get_mini_chart_data(code):
     try:
-        # 최근 30일 데이터 조회
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=40) # 휴장일 고려 넉넉히
+        start_date = end_date - timedelta(days=50) # 넉넉히 가져옴
         df = fdr.DataReader(code, start=start_date)
-        return df['Close'].tail(30) # 진짜 30개만 자름
+        return df['Close'].tail(30) # 최근 30개만
     except:
         return None
+
+# 4. [NEW] 줌인 차트 그리기 함수 (Plotly 사용)
+def plot_sparkline(data, color_hex):
+    # 차트 그릴 캔버스 생성
+    fig = go.Figure()
+    
+    # 선 그리기
+    fig.add_trace(go.Scatter(
+        x=data.index, 
+        y=data.values, 
+        mode='lines', 
+        line=dict(color=color_hex, width=2), # 선 두께 조절
+        hoverinfo='y' # 마우스 올리면 가격 보임
+    ))
+    
+    # 차트 꾸미기 (핵심: 여백 제거 및 줌인)
+    min_val = data.min()
+    max_val = data.max()
+    padding = (max_val - min_val) * 0.1 # 위아래 10% 여유
+
+    fig.update_layout(
+        showlegend=False,
+        margin=dict(l=0, r=0, t=0, b=0), # 여백 0 (꽉 차게)
+        height=80, # 높이 고정
+        paper_bgcolor='rgba(0,0,0,0)', # 배경 투명
+        plot_bgcolor='rgba(0,0,0,0)',
+        xaxis=dict(visible=False), # X축(날짜) 숨김
+        # 👇 여기가 핵심! (0부터가 아니라 최소값~최대값으로 범위 한정)
+        yaxis=dict(visible=False, range=[min_val - padding, max_val + padding]) 
+    )
+    return fig
 
 def clean_data(df):
     if df.empty: return df
@@ -85,7 +114,6 @@ if raw_df is not None and not raw_df.empty:
     if '탐색일' in df.columns:
         df = df.sort_values(by='탐색일', ascending=False)
 
-    # 상단 요약
     total = len(df)
     today_cnt = len(df[df['탐색일'] == df['탐색일'].iloc[0]])
     
@@ -102,7 +130,7 @@ if raw_df is not None and not raw_df.empty:
         profit = row['수익률_숫자']
         profit_str = row['수익률(%)']
         price = row['현재가_표시']
-        code = row['코드'].replace("'", "") # '005930 -> 005930 변환
+        code = row['코드'].replace("'", "")
         
         try:
             price_fmt = f"{int(str(price).replace(',','')): ,}원"
@@ -111,23 +139,23 @@ if raw_df is not None and not raw_df.empty:
 
         badge_class = "profit-badge-plus" if profit >= 0 else "profit-badge-minus"
         
-        # --- 카드 디자인 (좌:정보 / 우:차트) ---
         with st.container(border=True):
-            col_info, col_chart = st.columns([1.8, 1.2]) # 왼쪽(글씨) 넓게, 오른쪽(차트) 좁게
+            col_info, col_chart = st.columns([1.8, 1.2])
             
-            # [왼쪽] 텍스트 정보
             with col_info:
                 st.markdown(f"**{row['종목명']}** <span style='color:#888; font-size:0.8em;'>({code})</span> <span class='{badge_class}'>{profit_str}</span>", unsafe_allow_html=True)
                 st.markdown(f"<div style='margin-top:5px; font-size:0.95em; font-weight:bold;'>{price_fmt}</div>", unsafe_allow_html=True)
                 st.caption(f"{row['탐색일']} 포착 | {row['거래량급증']}")
             
-            # [오른쪽] 미니 차트 (Streamlit 내장 차트)
             with col_chart:
                 chart_data = get_mini_chart_data(code)
                 if chart_data is not None and not chart_data.empty:
-                    # 차트 그리기 (빨강:상승, 파랑:하락)
-                    color = '#d32f2f' if profit >= 0 else '#1976d2'
-                    st.line_chart(chart_data, height=80, use_container_width=True) # 높이를 80으로 작게 설정
+                    # 색상 결정
+                    color_hex = '#d32f2f' if profit >= 0 else '#1976d2'
+                    
+                    # [NEW] 줌인 차트 그리기
+                    fig = plot_sparkline(chart_data, color_hex)
+                    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
                 else:
                     st.caption("차트 로딩 실패")
 
