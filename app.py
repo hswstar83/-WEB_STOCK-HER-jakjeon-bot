@@ -21,7 +21,6 @@ st.markdown("""
     .main-title { font-size: 1.8rem !important; color: #1E1E1E; text-align: center; font-weight: 800; margin-bottom: 5px; }
     .sub-text { font-size: 0.9rem; color: #555; text-align: center; margin-bottom: 20px; }
     
-    /* 배지 스타일 */
     .badge {
         padding: 3px 8px;
         border-radius: 4px;
@@ -32,7 +31,6 @@ st.markdown("""
     .badge-red { background-color: #ffebee; color: #d32f2f; }
     .badge-blue { background-color: #e3f2fd; color: #1976d2; }
     
-    /* 🌟 [수정됨] 상세 정보 박스 스타일 (아래쪽 여백 추가) */
     .detail-info {
         font-size: 0.85rem;
         color: #444;
@@ -40,7 +38,7 @@ st.markdown("""
         padding: 12px;
         border-radius: 8px;
         margin-top: 12px;
-        margin-bottom: 8px; /* 👈 여기에 여백을 줘서 카드를 아래로 키움 */
+        margin-bottom: 8px;
         line-height: 1.6;
         border: 1px solid #eee;
     }
@@ -240,7 +238,8 @@ if raw_df is not None and not raw_df.empty:
                 if chart_data is not None and not chart_data.empty:
                     color_hex = '#d32f2f' if total_profit >= 0 else '#1976d2'
                     fig = plot_sparkline(chart_data, color_hex)
-                    st.plotly_chart(fig, use_container_width=True, config={'staticPlot': True}) 
+                    # 🌟 [수정됨] key=f"chart_{code}_{index}" 추가 (에러 해결!)
+                    st.plotly_chart(fig, use_container_width=True, config={'staticPlot': True}, key=f"chart_{code}_{index}") 
                 else:
                     st.caption("차트 로딩 실패")
             
